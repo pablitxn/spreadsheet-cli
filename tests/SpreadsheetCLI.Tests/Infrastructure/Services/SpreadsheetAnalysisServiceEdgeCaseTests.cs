@@ -6,8 +6,10 @@ using Aspose.Cells;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Moq;
-using SpreadsheetCLI.Core.Application.Interfaces;
-using SpreadsheetCLI.Core.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Application.Interfaces;
+using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Application.DTOs;
+using SpreadsheetCLI.Domain.ValueObjects;
 using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
 using Xunit;
 

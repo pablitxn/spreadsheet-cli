@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
-using SpreadsheetCLI.Core.Application.Interfaces;
+using SpreadsheetCLI.Application.Interfaces;
 
 namespace SpreadsheetCLI.Infrastructure.Mocks;
 

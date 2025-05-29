@@ -10,8 +10,12 @@ using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 using OpenAI.Chat;
-using SpreadsheetCLI.Core.Application.Interfaces;
-using SpreadsheetCLI.Core.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Application.Interfaces;
+using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Application.DTOs;
+using SpreadsheetCLI.Domain.Entities;
+using SpreadsheetCLI.Domain.Enums;
+using SpreadsheetCLI.Domain.ValueObjects;
 
 namespace SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
 

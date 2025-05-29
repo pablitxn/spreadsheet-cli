@@ -8,8 +8,10 @@ using System.Threading.Tasks;
 using Aspose.Cells;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
-using SpreadsheetCLI.Core.Application.Interfaces;
-using SpreadsheetCLI.Core.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Application.Interfaces;
+using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Application.DTOs;
+using SpreadsheetCLI.Domain.Enums;
 
 namespace SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Plugins;
 

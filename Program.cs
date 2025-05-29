@@ -8,11 +8,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
-using SpreadsheetCLI.Core.Application.Interfaces;
-using SpreadsheetCLI.Core.Application.Interfaces.Spreadsheet;
-using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Plugins;
+using SpreadsheetCLI.Application.Interfaces;
+using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel;
 using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
+using SpreadsheetCLI.Domain.Interfaces;
+using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Plugins;
 using SpreadsheetCLI.Infrastructure.Mocks;
+using SpreadsheetCLI.Infrastructure.Repositories;
+using SpreadsheetCLI.Presentation.ConsoleUI;
 
 namespace SpreadsheetCLI;
 
@@ -51,11 +55,12 @@ public class Program
                 services.AddMemoryCache();
                 services.AddSingleton<IDistributedCache, MemoryDistributedCache>();
 
-                // Add mock services
+                // Add infrastructure services
                 services.AddSingleton<IFileStorageService, LocalFileStorageService>();
-                services.AddSingleton<IActivityPublisher, FileAndConsoleActivityPublisher>();
+                services.AddSingleton<IActivityPublisher, ConsoleActivityPublisher>();
+                services.AddSingleton<ISpreadsheetRepository, AsposeSpreadsheetRepository>();
 
-                // Add spreadsheet services
+                // Add application services
                 services.AddSingleton<ISpreadsheetAnalysisService, SpreadsheetAnalysisService>();
 
                 // Add Semantic Kernel
@@ -92,17 +97,10 @@ public class Program
     {
         var plugin = host.Services.GetRequiredService<SpreadsheetPlugin>();
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
-        var activityPublisher = host.Services.GetRequiredService<IActivityPublisher>() as FileAndConsoleActivityPublisher;
+        var activityPublisher = host.Services.GetRequiredService<IActivityPublisher>();
 
         Console.WriteLine("=== SpreadsheetCLI Interactive Mode ===");
         
-        if (activityPublisher != null)
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"📝 Audit log file: {activityPublisher.GetLogFilePath()}");
-            Console.ResetColor();
-            Console.WriteLine();
-        }
         
         Console.WriteLine("Enter the path to your Excel file:");
 
@@ -189,13 +187,6 @@ public class Program
 
         Console.WriteLine("\nGoodbye!");
         
-        if (activityPublisher != null)
-        {
-            Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"📝 Audit log saved to: {activityPublisher.GetLogFilePath()}");
-            Console.ResetColor();
-        }
     }
 
     static async Task RunCommandMode(IHost host, string[] args)
@@ -210,7 +201,7 @@ public class Program
         var query = string.Join(" ", args.Skip(1));
 
         var plugin = host.Services.GetRequiredService<SpreadsheetPlugin>();
-        var activityPublisher = host.Services.GetRequiredService<IActivityPublisher>() as FileAndConsoleActivityPublisher;
+        var activityPublisher = host.Services.GetRequiredService<IActivityPublisher>();
 
         try
         {
@@ -251,12 +242,5 @@ public class Program
         }
         
         // Show log file location on success
-        if (activityPublisher != null)
-        {
-            Console.WriteLine();
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"📝 Audit log saved to: {activityPublisher.GetLogFilePath()}");
-            Console.ResetColor();
-        }
     }
 }

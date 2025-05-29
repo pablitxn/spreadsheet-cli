@@ -1,7 +1,7 @@
 using System.IO;
 using System.Threading.Tasks;
 
-namespace SpreadsheetCLI.Core.Application.Interfaces;
+namespace SpreadsheetCLI.Application.Interfaces;
 
 public interface IFileStorageService
 {

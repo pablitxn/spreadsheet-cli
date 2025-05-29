@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
-using SpreadsheetCLI.Core.Application.Interfaces.Spreadsheet;
+using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
 using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
 
-namespace Infrastructure.Ai.SemanticKernel;
+namespace SpreadsheetCLI.Infrastructure.Ai.SemanticKernel;
 
 /// <summary>
 /// Extension methods for registering spreadsheet services
