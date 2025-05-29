@@ -11,6 +11,7 @@ using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
 using SpreadsheetCLI.Application.DTOs;
 using SpreadsheetCLI.Domain.ValueObjects;
 using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
+using SpreadsheetCLI.Infrastructure.Services;
 using Xunit;
 
 namespace SpreadsheetCLI.Tests.Infrastructure.Services;
@@ -20,6 +21,7 @@ public class SpreadsheetAnalysisServiceEdgeCaseTests
     private readonly Mock<ILogger<SpreadsheetAnalysisService>> _loggerMock;
     private readonly Mock<IChatCompletionService> _chatCompletionMock;
     private readonly Mock<IActivityPublisher> _activityPublisherMock;
+    private readonly Mock<FileLoggerService> _fileLoggerMock;
     private readonly SpreadsheetAnalysisService _service;
 
     public SpreadsheetAnalysisServiceEdgeCaseTests()
@@ -27,10 +29,12 @@ public class SpreadsheetAnalysisServiceEdgeCaseTests
         _loggerMock = new Mock<ILogger<SpreadsheetAnalysisService>>();
         _chatCompletionMock = new Mock<IChatCompletionService>();
         _activityPublisherMock = new Mock<IActivityPublisher>();
+        _fileLoggerMock = new Mock<FileLoggerService>();
         _service = new SpreadsheetAnalysisService(
             _loggerMock.Object,
             _chatCompletionMock.Object,
-            _activityPublisherMock.Object);
+            _activityPublisherMock.Object,
+            _fileLoggerMock.Object);
     }
 
     #region Large Dataset Tests
