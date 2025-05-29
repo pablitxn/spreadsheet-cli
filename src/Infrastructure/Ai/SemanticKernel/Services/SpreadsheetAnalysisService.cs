@@ -16,6 +16,7 @@ using SpreadsheetCLI.Application.DTOs;
 using SpreadsheetCLI.Domain.Entities;
 using SpreadsheetCLI.Domain.Enums;
 using SpreadsheetCLI.Domain.ValueObjects;
+using SpreadsheetCLI.Infrastructure.Services;
 
 namespace SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
 
@@ -25,7 +26,8 @@ namespace SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
 public class SpreadsheetAnalysisService(
     ILogger<SpreadsheetAnalysisService> logger,
     IChatCompletionService chatCompletion,
-    IActivityPublisher activityPublisher)
+    IActivityPublisher activityPublisher,
+    FileLoggerService fileLogger)
     : ISpreadsheetAnalysisService
 {
     private readonly ILogger<SpreadsheetAnalysisService> _logger =
@@ -36,6 +38,9 @@ public class SpreadsheetAnalysisService(
 
     private readonly IActivityPublisher _activityPublisher =
         activityPublisher ?? throw new ArgumentNullException(nameof(activityPublisher));
+
+    private readonly FileLoggerService _fileLogger =
+        fileLogger ?? throw new ArgumentNullException(nameof(fileLogger));
 
     private const int SampleSize = 50;
     private const int MaxIterations = 10;
@@ -139,6 +144,16 @@ public class SpreadsheetAnalysisService(
                 artifactsCount = artifacts.Count,
                 continueAnalysis,
                 userIntentWithContext = batchResult.UserIntentWithContext
+            });
+
+            // Log batch analysis details for debugging
+            await _fileLogger.LogDebugAsync("batch_analysis_result", new
+            {
+                iteration = iterationCount,
+                batchResult,
+                currentRowIndex,
+                markdownTableLength = markdownTable.Length,
+                artifactsCollected = artifacts
             });
         }
 
@@ -1073,6 +1088,17 @@ public class SpreadsheetAnalysisService(
 
         var result = JsonSerializer.Deserialize<BatchAnalysisResult>(response[0].Content ?? "{}");
 
+        // Log batch LLM analysis details
+        await _fileLogger.LogDebugAsync("batch_llm_analysis", new
+        {
+            iteration,
+            promptLength = prompt.Length,
+            modelResponse = response[0].Content,
+            parsedResult = result,
+            continueSnapshot = result?.ContinueSnapshot,
+            newArtifactsLength = result?.NewArtifacts?.Length ?? 0
+        });
+
         return result ?? new BatchAnalysisResult();
     }
 
@@ -1215,6 +1241,20 @@ public class SpreadsheetAnalysisService(
             chatHistory, settings, cancellationToken: cancellationToken);
 
         var result = JsonSerializer.Deserialize<ExecutionPlanResponse>(response[0].Content ?? "{}");
+
+        // Log execution plan generation details
+        await _fileLogger.LogDebugAsync("execution_plan_generated", new
+        {
+            query,
+            userIntentWithContext,
+            combinedArtifactsLength = combinedArtifacts.Length,
+            modelResponse = response[0].Content,
+            parsedResult = result,
+            artifactsFormatted = result?.ArtifactsFormatted,
+            formula = result?.Formula,
+            simpleAnswer = result?.SimpleAnswer,
+            reasoning = result?.Reasoning
+        });
 
         // Convert the execution plan to QueryAnalysisResult
         // This is a temporary mapping until we update the return type

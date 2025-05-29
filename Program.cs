@@ -17,6 +17,7 @@ using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Plugins;
 using SpreadsheetCLI.Infrastructure.Mocks;
 using SpreadsheetCLI.Infrastructure.Repositories;
 using SpreadsheetCLI.Presentation.ConsoleUI;
+using SpreadsheetCLI.Infrastructure.Services;
 
 namespace SpreadsheetCLI;
 
@@ -61,7 +62,7 @@ public class Program
                 {
                     builder.ClearProviders();
                     // Don't add console logger for now to avoid interference
-                    builder.SetMinimumLevel(LogLevel.Warning);
+                    builder.SetMinimumLevel(LogLevel.Debug);
                 });
 
                 // Add caching
@@ -70,8 +71,9 @@ public class Program
 
                 // Add infrastructure services
                 services.AddSingleton<IFileStorageService, LocalFileStorageService>();
-                services.AddSingleton<IActivityPublisher, ConsoleActivityPublisher>();
+                services.AddSingleton<IActivityPublisher, FileAndConsoleActivityPublisher>();
                 services.AddSingleton<ISpreadsheetRepository, AsposeSpreadsheetRepository>();
+                services.AddSingleton<FileLoggerService>();
 
                 // Add application services
                 services.AddSingleton<ISpreadsheetAnalysisService, SpreadsheetAnalysisService>();
