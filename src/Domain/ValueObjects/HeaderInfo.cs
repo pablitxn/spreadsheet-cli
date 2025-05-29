@@ -1,5 +1,7 @@
 namespace SpreadsheetCLI.Domain.ValueObjects;
 
+using System;
+
 /// <summary>
 /// Header information including name and row index
 /// </summary>

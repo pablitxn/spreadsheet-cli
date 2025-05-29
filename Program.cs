@@ -24,7 +24,15 @@ public class Program
 {
     static async Task Main(string[] args)
     {
-        var host = CreateHostBuilder(args).Build();
+        IHost host;
+        try
+        {
+            host = CreateHostBuilder(args).Build();
+        }
+        catch (Exception ex)
+        {
+            throw;
+        }
 
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
         logger.LogInformation("SpreadsheetCLI Started");
@@ -41,13 +49,18 @@ public class Program
 
     static IHostBuilder CreateHostBuilder(string[] args) =>
         Host.CreateDefaultBuilder(args)
+            .ConfigureLogging(logging =>
+            {
+                // Disable default console logging to avoid interference
+                logging.ClearProviders();
+            })
             .ConfigureServices((context, services) =>
             {
                 // Add logging
                 services.AddLogging(builder =>
                 {
                     builder.ClearProviders();
-                    builder.AddConsole();
+                    // Don't add console logger for now to avoid interference
                     builder.SetMinimumLevel(LogLevel.Warning);
                 });
 
@@ -199,14 +212,13 @@ public class Program
 
         var filePath = Path.GetFullPath(args[0]);
         var query = string.Join(" ", args.Skip(1));
-
+        
         var plugin = host.Services.GetRequiredService<SpreadsheetPlugin>();
         var activityPublisher = host.Services.GetRequiredService<IActivityPublisher>();
 
         try
         {
             var result = await plugin.QuerySpreadsheetAsync(filePath, query);
-            
             // Parse and pretty-print the JSON result
             try
             {
@@ -218,7 +230,7 @@ public class Program
                 var prettyJson = JsonSerializer.Serialize(jsonResult, options);
                 Console.WriteLine(prettyJson);
             }
-            catch
+            catch (Exception parseEx)
             {
                 // If JSON parsing fails, print the raw result
                 Console.WriteLine(result);
@@ -230,13 +242,7 @@ public class Program
             Console.WriteLine($"Error: {ex.Message}");
             Console.ResetColor();
             
-            if (activityPublisher != null)
-            {
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"📝 Audit log saved to: {activityPublisher.GetLogFilePath()}");
-                Console.ResetColor();
-            }
+            // Error logged
             
             Environment.Exit(1);
         }

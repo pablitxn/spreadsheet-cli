@@ -84,9 +84,25 @@ print_success "🚀 Executing query..."
 echo
 
 # Run the query with proper error handling
-if ! "$EXECUTABLE" "$DATASET_FILE" "$1"; then
+RESULT=$("$EXECUTABLE" "$DATASET_FILE" "$1" 2>&1)
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
     print_error "Query execution failed!"
+    echo "$RESULT"
     exit 1
+fi
+
+# Extract only the JSON output
+# Look for content between first { and last }
+JSON_OUTPUT=$(echo "$RESULT" | awk '/^\{/{p=1} p{print} /^\}/{p=0}')
+
+if [ -z "$JSON_OUTPUT" ]; then
+    # If no JSON found, print all output
+    echo "$RESULT"
+else
+    # Pretty print the JSON
+    echo "$JSON_OUTPUT" | python3 -m json.tool 2>/dev/null || echo "$JSON_OUTPUT"
 fi
 
 print_success "Query completed successful" 

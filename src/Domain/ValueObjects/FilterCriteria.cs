@@ -1,5 +1,7 @@
 namespace SpreadsheetCLI.Domain.ValueObjects;
 
+using System;
+
 /// <summary>
 /// Filter criteria for data filtering
 /// </summary>
