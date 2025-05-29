@@ -1,0 +1,35 @@
+## Ignore build output directories
+bin/
+obj/
+
+## Ignore Visual Studio temporary files and folders
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Ignore auto-generated files
+Generated\ Files/
+
+## Ignore temporary and log files
+*.tmp
+*.temp
+*.log
+
+## Ignore test result files
+[Bb]uild[Ll]og.*
+
+## Ignore NuGet packages folder (if packages are restored on build)
+packages/
+*.nupkg
+
+## Ignore local configuration files
+*.local.json
+
+## Additional ignores (if using JetBrains Rider, etc.)
+.idea/
+*.iml
+data/*
+
+**/data
