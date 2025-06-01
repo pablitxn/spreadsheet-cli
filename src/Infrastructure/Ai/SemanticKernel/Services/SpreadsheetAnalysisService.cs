@@ -1143,6 +1143,8 @@ public class SpreadsheetAnalysisService(
                       - When using MIN, MAX, AVERAGE, VAR.S, VAR.P, PERCENTILE, etc., ensure ArtifactsFormatted contains ALL relevant data
                       - For date columns: Include ALL date values to avoid MIN returning 0
                       - Use the full range: e.g., =MIN(A2:A23) if you have 22 data rows
+                      - For PERCENTILE: Use PERCENTILE.INC function (not PERCENTILE) with syntax: =PERCENTILE.INC(range, k)
+                      - For 90th percentile (P90): Use =PERCENTILE.INC(A2:A[n], 0.9) where n is last data row
 
                       Always for any mathematical calculations return `NeedRunFormula=true`:
 
@@ -1171,6 +1173,22 @@ public class SpreadsheetAnalysisService(
                       - For group-based queries asking "which X has highest/lowest Y": 
                         * MachineAnswer = just the Y value
                         * HumanExplanation = "X has Y value of [amount]"
+                      - SimpleAnswer: Always populate with the answer value for direct extraction
+                      - For queries without formulas, put the answer in BOTH SimpleAnswer AND MachineAnswer
+                      
+                      SPECIFIC QUERY PATTERNS:
+                      1. "What is the total X for Y = Z": Sum all X values where Y equals Z
+                         - Extract all rows where Y = Z, sum the X column
+                         - Put total in SimpleAnswer AND MachineAnswer
+                      2. "What is the X-to-Y ratio for Z": Calculate ratio for specific entity
+                         - Find the row(s) for entity Z
+                         - Calculate ratio = X/Y
+                         - Put ratio value in SimpleAnswer AND MachineAnswer
+                      3. "What is the ratio of X to Y": Aggregate ratio of totals
+                         - Calculate total X across all relevant rows
+                         - Calculate total Y across all relevant rows  
+                         - Ratio = Total X / Total Y
+                         - Put ratio value in SimpleAnswer AND MachineAnswer
                       
                       Instructions:
                       1. If the query can be answered directly from the artifacts (zero math needed), provide a simple_answer
@@ -1648,15 +1666,14 @@ public class SpreadsheetAnalysisService(
                         if (rounded % 1 == 0)
                             return rounded.ToString("N0"); // No decimal places, with thousands separator
                         else
-                            return rounded.ToString("N2").Replace(",", " "); // 2 decimal places with space as thousands separator
+                            return rounded.ToString("F2"); // 2 decimal places without separator
                     }
                 }
                 else if (absValue >= 1000)
                 {
-                    // For thousands, use space as separator like "31 683.10"
+                    // For thousands, use consistent formatting without separator
                     var rounded = Math.Round(d, 2);
-                    var formatted = rounded.ToString("N2");
-                    return formatted.Replace(",", " ");
+                    return rounded.ToString("F2");
                 }
                 else if (absValue >= 100)
                 {
@@ -1951,6 +1968,8 @@ public class SpreadsheetAnalysisService(
         public string Formula { get; set; } = "";
         public string SimpleAnswer { get; set; } = "";
         public string Reasoning { get; set; } = "";
+        public string MachineAnswer { get; set; } = "";
+        public string HumanExplanation { get; set; } = "";
     }
 
     #endregion
