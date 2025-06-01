@@ -1486,7 +1486,6 @@ public class SpreadsheetAnalysisService(
             debugInfo["formulaValue"] = formulaValue ?? "null";
             debugInfo["formulaValueType"] = formulaValue?.GetType().Name ?? "null";
             debugInfo["isError"] = formulaCell.IsErrorValue;
-            debugInfo["isDateFormula"] = isDateFormula;
 
             if (formulaCell.IsErrorValue)
             {
@@ -1687,10 +1686,10 @@ public class SpreadsheetAnalysisService(
                 }
                     
             case float f:
-                return FormatFormulaResult((double)f, isDateFormula);
+                return FormatFormulaResult((double)f);
                 
             case decimal dec:
-                return FormatFormulaResult((double)dec, isDateFormula);
+                return FormatFormulaResult((double)dec);
                 
             case int i:
                 return i.ToString("N0");
@@ -1968,8 +1967,6 @@ public class SpreadsheetAnalysisService(
         public string Formula { get; set; } = "";
         public string SimpleAnswer { get; set; } = "";
         public string Reasoning { get; set; } = "";
-        public string MachineAnswer { get; set; } = "";
-        public string HumanExplanation { get; set; } = "";
     }
 
     #endregion
