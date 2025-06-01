@@ -1154,15 +1154,23 @@ public class SpreadsheetAnalysisService(
                       - For percentage calculations: Use the counts mentioned in UserIntentWithContext!
 
                       VARIANCE AND GROUP CALCULATIONS:
-                      - For "highest variance per group": Return BOTH the group identifier AND the variance value
+                      - For "highest variance per group": Calculate variance for each group, identify the highest
                       - Use VAR.S for sample variance (n-1 denominator) unless specifically asked for population variance
                       - Clean numeric data before variance: Round quantities to reasonable precision
-                      - Format: "Group X has variance Y"
+                      - IMPORTANT: Return only the numeric variance value in SimpleAnswer, not a narrative sentence
+                      - In Reasoning, you can explain which group has the highest variance
                       
                       OUTPUT FORMATTING:
                       - Round results to 2 decimal places for display
                       - Format large numbers with thousand separators
                       - For variance values, use scientific notation if > 1e9
+                      
+                      ANSWER SEPARATION (CRITICAL):
+                      - MachineAnswer: ONLY the numeric result or direct answer (e.g., "291839462.7", "2021-11-15", "MSFT")
+                      - HumanExplanation: Full narrative with context (e.g., "SecurityGroup 1 has the highest variance of 291839462.7")
+                      - For group-based queries asking "which X has highest/lowest Y": 
+                        * MachineAnswer = just the Y value
+                        * HumanExplanation = "X has Y value of [amount]"
                       
                       Instructions:
                       1. If the query can be answered directly from the artifacts (zero math needed), provide a simple_answer
@@ -1249,6 +1257,14 @@ public class SpreadsheetAnalysisService(
                                                   "Reasoning": {
                                                     "type": "string",
                                                     "description": "Explanation of the approach taken"
+                                                  },
+                                                  "MachineAnswer": {
+                                                    "type": "string",
+                                                    "description": "Machine-readable answer: just the numeric value/result, no narrative"
+                                                  },
+                                                  "HumanExplanation": {
+                                                    "type": "string",
+                                                    "description": "Human-readable explanation with context (e.g., 'Group X has variance Y')"
                                                   }
                                                 },
                                                 "required": [
@@ -1256,7 +1272,9 @@ public class SpreadsheetAnalysisService(
                                                   "ArtifactsFormatted",
                                                   "Formula",
                                                   "SimpleAnswer",
-                                                  "Reasoning"
+                                                  "Reasoning",
+                                                  "MachineAnswer",
+                                                  "HumanExplanation"
                                                 ],
                                                 "additionalProperties": false
                                               }
@@ -1427,11 +1445,30 @@ public class SpreadsheetAnalysisService(
 
             // Get the result
             var formulaValue = formulaCell.Value;
-            var formulaResult = FormatFormulaResult(formulaValue);
+            
+            // Check if the formula operates on date columns
+            bool isDateFormula = false;
+            if (executionPlan.Formula != null && executionPlan.ArtifactsFormatted != null && executionPlan.ArtifactsFormatted.Count > 0)
+            {
+                // Check if formula references known date columns
+                var formulaUpper = executionPlan.Formula.ToUpper();
+                isDateFormula = formulaUpper.Contains("EXDATE") || formulaUpper.Contains("PAYDATE") || 
+                               formulaUpper.Contains("DATE");
+                
+                // Also check if the column header contains date-related keywords
+                if (!isDateFormula && executionPlan.ArtifactsFormatted[0].Count > 0)
+                {
+                    var firstHeader = executionPlan.ArtifactsFormatted[0][0]?.ToString()?.ToUpper() ?? "";
+                    isDateFormula = firstHeader.Contains("DATE") || firstHeader == "EXDATE" || firstHeader == "PAYDATE";
+                }
+            }
+            
+            var formulaResult = FormatFormulaResult(formulaValue, isDateFormula);
 
             debugInfo["formulaValue"] = formulaValue ?? "null";
             debugInfo["formulaValueType"] = formulaValue?.GetType().Name ?? "null";
             debugInfo["isError"] = formulaCell.IsErrorValue;
+            debugInfo["isDateFormula"] = isDateFormula;
 
             if (formulaCell.IsErrorValue)
             {
@@ -1545,7 +1582,7 @@ public class SpreadsheetAnalysisService(
     /// <summary>
     /// Formats formula results appropriately based on type
     /// </summary>
-    private string FormatFormulaResult(object? value)
+    private string FormatFormulaResult(object? value, bool isDateFormula = false)
     {
         if (value == null) return "No result";
         
@@ -1556,8 +1593,22 @@ public class SpreadsheetAnalysisService(
                 if (double.IsNaN(d)) return "NaN";
                 if (double.IsInfinity(d)) return "Infinity";
                 
-                // Don't try to convert to date unless we have context that it should be a date
-                // This prevents numeric sums from being displayed as dates
+                // If this is a date formula (MIN/MAX on date columns), convert OLE date to ISO format
+                if (isDateFormula && d >= 1 && d <= 100000)
+                {
+                    try
+                    {
+                        var dateValue = DateTime.FromOADate(d);
+                        if (dateValue.Year >= 1900 && dateValue.Year <= 2100)
+                        {
+                            return dateValue.ToString("yyyy-MM-dd");
+                        }
+                    }
+                    catch
+                    {
+                        // Not a valid date, continue with numeric formatting
+                    }
+                }
                 
                 // Format numbers appropriately
                 var absValue = Math.Abs(d);
@@ -1580,12 +1631,32 @@ public class SpreadsheetAnalysisService(
                 // For larger numbers
                 if (absValue >= 1000000)
                 {
-                    // Round to 2 decimal places and format
-                    var rounded = Math.Round(d, 2);
-                    if (rounded % 1 == 0)
-                        return rounded.ToString("N0"); // No decimal places, with thousands separator
+                    // For very large variance values (>100M), use exact value with proper decimal
+                    if (absValue >= 100000000)
+                    {
+                        // Check if we need decimal places
+                        var rounded = Math.Round(d, 1);
+                        if (Math.Abs(rounded - Math.Round(rounded, 0)) < 0.01)
+                            return rounded.ToString("F0"); // No decimal places
+                        else
+                            return rounded.ToString("F1"); // 1 decimal place like "291839462.7"
+                    }
                     else
-                        return rounded.ToString("N2"); // 2 decimal places with thousands separator
+                    {
+                        // Regular large numbers with thousands separator
+                        var rounded = Math.Round(d, 2);
+                        if (rounded % 1 == 0)
+                            return rounded.ToString("N0"); // No decimal places, with thousands separator
+                        else
+                            return rounded.ToString("N2").Replace(",", " "); // 2 decimal places with space as thousands separator
+                    }
+                }
+                else if (absValue >= 1000)
+                {
+                    // For thousands, use space as separator like "31 683.10"
+                    var rounded = Math.Round(d, 2);
+                    var formatted = rounded.ToString("N2");
+                    return formatted.Replace(",", " ");
                 }
                 else if (absValue >= 100)
                 {
@@ -1599,10 +1670,10 @@ public class SpreadsheetAnalysisService(
                 }
                     
             case float f:
-                return FormatFormulaResult((double)f);
+                return FormatFormulaResult((double)f, isDateFormula);
                 
             case decimal dec:
-                return FormatFormulaResult((double)dec);
+                return FormatFormulaResult((double)dec, isDateFormula);
                 
             case int i:
                 return i.ToString("N0");

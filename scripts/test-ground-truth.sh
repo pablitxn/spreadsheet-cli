@@ -97,17 +97,17 @@ fi
 
 # Check if dotnet-script is available, otherwise compile and use the C# extractor
 EXTRACTOR_SCRIPT="./scripts/extract-ground-truth.csx"
-EXTRACTOR_EXE="./scripts/ExtractGroundTruth"
+EXTRACTOR_EXE="./scripts/bin/Release/net9.0/ExtractGroundTruth"
 
 # Function to extract ground truth data
 extract_ground_truth() {
-    # Try dotnet-script
-    if command -v dotnet-script &> /dev/null && [ -f "$EXTRACTOR_SCRIPT" ]; then
-        # Use dotnet-script if available
-        dotnet-script "$EXTRACTOR_SCRIPT" "$GROUND_TRUTH_FILE" 2>/dev/null
-    elif [ -f "$EXTRACTOR_EXE" ]; then
+    # Try the compiled .NET executable first
+    if [ -f "$EXTRACTOR_EXE" ]; then
         # Use pre-compiled executable
-        "$EXTRACTOR_EXE" "$GROUND_TRUTH_FILE" 2>/dev/null
+        "$EXTRACTOR_EXE" "$GROUND_TRUTH_FILE"
+    elif command -v dotnet-script &> /dev/null && [ -f "$EXTRACTOR_SCRIPT" ]; then
+        # Use dotnet-script if available
+        dotnet-script "$EXTRACTOR_SCRIPT" "$GROUND_TRUTH_FILE"
     else
         # Try to compile the extractor using Aspose.Cells (same as main project)
         print_info "Compiling ground truth extractor..."
@@ -413,7 +413,8 @@ for i in "${!TEST_QUESTIONS[@]}"; do
         fi
         
         # Pattern 5: For percentage questions, look for X%
-        if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"percentage"* || "$QUESTION" == *"percent"* ]]; then
+        # Skip percentile questions as they should return actual values, not percentages
+        if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"percentage"* || "$QUESTION" == *"percent"* ]] && [[ "$QUESTION" != *"percentile"* ]]; then
             ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "[0-9.-]+%" | tail -1)
         fi
         

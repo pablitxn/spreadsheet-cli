@@ -145,8 +145,9 @@ public sealed class SpreadsheetPlugin(
                 {
                     Success = true,
                     Query = query,
-                    Answer = executionPlan.SimpleAnswer,
+                    Answer = executionPlan.MachineAnswer ?? executionPlan.SimpleAnswer,
                     Reasoning = executionPlan.Reasoning,
+                    HumanExplanation = executionPlan.HumanExplanation,
                     RequiredCalculation = false,
                     DatasetContext = new
                     {
@@ -281,9 +282,10 @@ public sealed class SpreadsheetPlugin(
                 {
                     Success = true,
                     Query = query,
-                    Answer = formulaResult,
+                    Answer = executionPlan.MachineAnswer ?? formulaResult,
                     Formula = executionPlan.Formula,
                     Reasoning = executionPlan.Reasoning,
+                    HumanExplanation = executionPlan.HumanExplanation,
                     RequiredCalculation = true,
                     DatasetContext = new
                     {
