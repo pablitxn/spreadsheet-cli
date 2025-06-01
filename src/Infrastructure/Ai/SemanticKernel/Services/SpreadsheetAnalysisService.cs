@@ -1123,6 +1123,7 @@ public class SpreadsheetAnalysisService(
 
                       CRITICAL: Formula Generation for Dynamic Spreadsheet
                       - You will be creating a formula that operates on a NEW spreadsheet created from ArtifactsFormatted
+                      - The dynamic spreadsheet contains ONLY the data you put in ArtifactsFormatted (not the full original dataset!)
                       - The dynamic spreadsheet will have columns starting from A, B, C, etc.
                       - DO NOT use column references from the original file 
                       - Map your columns based on the order in ArtifactsFormatted:
@@ -1130,6 +1131,7 @@ public class SpreadsheetAnalysisService(
                         * Second column in ArtifactsFormatted = Column B
                         * Third column in ArtifactsFormatted = Column C, etc.
                       - Data starts at row 2 (row 1 contains headers)
+                      - IMPORTANT: If you extracted 100 matching rows, the dynamic sheet has 101 rows (1 header + 100 data)
 
                       Always for any mathematical calculations return `NeedRunFormula=true`:
 
@@ -1153,8 +1155,11 @@ public class SpreadsheetAnalysisService(
                       FORMULA GUIDELINES based on UserIntentWithContext:
                       - Read the UserIntentWithContext carefully - it contains the exact counts!
                       - For percentage queries where UserIntentWithContext says "I found X rows matching out of Y total data rows":
-                        * Simple answer approach: Just calculate X/Y*100 directly
-                        * Formula approach: =COUNTA(range_with_matches)/{metadata.DataRowCount}*100
+                        * Simple answer approach: Just calculate X/Y*100 directly and put in SimpleAnswer
+                        * Formula approach: Since the dynamic spreadsheet only contains matching rows, use:
+                          - If calculating percentage: =(COUNTA(data_range)-1)/{metadata.DataRowCount}*100
+                          - Note: -1 to exclude header row, and {metadata.DataRowCount} is the total from original dataset
+                        * IMPORTANT: For SUM/AVERAGE queries on the dynamic spreadsheet, formulas operate only on the extracted data
                       - The key insight: UserIntentWithContext already did the hard work of counting!
 
                       Example reasoning for percentage query:
