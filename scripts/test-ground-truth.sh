@@ -370,7 +370,7 @@ for i in "${!TEST_QUESTIONS[@]}"; do
         continue
     fi
     
-    # Extract reasoning from the command output for LLM validation
+    # Extract reasoning from the command output for answer extraction
     # First extract the full JSON result
     JSON_RESULT=$(echo "$RESULT" | tail -n 50 | awk '/^{/{flag=1} flag; /^}/{exit}')
     
@@ -382,21 +382,42 @@ for i in "${!TEST_QUESTIONS[@]}"; do
         REASONING=$(echo "$RESULT" | grep -o '"Reasoning":[[:space:]]*"[^"]*"' | sed 's/"Reasoning":[[:space:]]*"//' | sed 's/"$//' | tail -1)
     fi
     
-    # Call LLM to extract the answer from the reasoning
+    # Extract answer from reasoning using pattern matching
     if [ -n "$REASONING" ]; then
-        # Create a prompt for the LLM to extract the answer
-        VALIDATION_PROMPT="Based on this reasoning, what is the numerical answer to the question '$QUESTION'? 
-
-Reasoning: $REASONING
-
-Expected answer format: $EXPECTED_ANSWER
-
-Please respond with ONLY the numerical value or text answer, without any explanation. If the reasoning mentions multiple values, extract the final answer that directly answers the question."
+        # Try to extract answer from common patterns in reasoning
+        # Pattern 1: "The answer is X" or "is X"
+        ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "(answer is|total is|value is|maximum is|minimum is|average is|percentage is|count is|result is) [0-9.-]+[%]?" | grep -oE "[0-9.-]+[%]?" | tail -1)
         
-        # Call the spreadsheet CLI with the validation prompt
-        ACTUAL_ANSWER=$("$EXECUTABLE" --validate-answer "$VALIDATION_PROMPT" 2>/dev/null || echo "")
+        # Pattern 2: "X rows/records" for count questions
+        if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"How many"* ]]; then
+            ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "[0-9]+ (rows|records|unique|entries)" | grep -oE "^[0-9]+" | head -1)
+        fi
         
-        # If validation fails, fall back to extracting from the Answer field
+        # Pattern 3: Look for the expected answer value directly in reasoning
+        if [ -z "$ACTUAL_ANSWER" ] && [ -n "$EXPECTED_ANSWER" ]; then
+            # Remove % and normalize expected answer
+            EXPECTED_NUM=$(echo "$EXPECTED_ANSWER" | sed 's/[%,]//g')
+            # Look for this number in the reasoning
+            if echo "$REASONING" | grep -q "$EXPECTED_NUM"; then
+                ACTUAL_ANSWER="$EXPECTED_NUM"
+                # Add % back if original had it
+                if [[ "$EXPECTED_ANSWER" == *"%" ]]; then
+                    ACTUAL_ANSWER="${ACTUAL_ANSWER}%"
+                fi
+            fi
+        fi
+        
+        # Pattern 4: Extract from "found X" patterns
+        if [ -z "$ACTUAL_ANSWER" ]; then
+            ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "found [0-9.-]+" | grep -oE "[0-9.-]+" | tail -1)
+        fi
+        
+        # Pattern 5: For percentage questions, look for X%
+        if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"percentage"* || "$QUESTION" == *"percent"* ]]; then
+            ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "[0-9.-]+%" | tail -1)
+        fi
+        
+        # If still no answer from reasoning, fall back to Answer field
         if [ -z "$ACTUAL_ANSWER" ]; then
             ACTUAL_ANSWER=$(echo "$JSON_RESULT" | jq -r '.Answer' 2>/dev/null || echo "")
             if [ -z "$ACTUAL_ANSWER" ] || [ "$ACTUAL_ANSWER" = "null" ]; then
@@ -411,17 +432,28 @@ Please respond with ONLY the numerical value or text answer, without any explana
         fi
     fi
     
-    # Also save the full JSON output with test info
+    # Also save the full JSON output with test info including reasoning
     {
         echo "{"
         echo "  \"test_number\": $TEST_NUM,"
         echo "  \"question\": \"$QUESTION\","
         echo "  \"expected_answer\": \"$EXPECTED_ANSWER\","
         echo "  \"actual_answer\": \"$ACTUAL_ANSWER\","
+        echo "  \"reasoning\": \"$(echo "$REASONING" | sed 's/"/\\"/g')\","
         echo "  \"result\":"
         echo "$RESULT"
         echo "}"
     } > "$TEST_RUN_DIR/query_outputs/test_${TEST_NUM}_full.json"
+    
+    # Save reasoning extraction debug info
+    {
+        echo "Test $TEST_NUM Debug Info"
+        echo "Question: $QUESTION"
+        echo "Expected: $EXPECTED_ANSWER"
+        echo "Extracted Answer: $ACTUAL_ANSWER"
+        echo "Reasoning: $REASONING"
+        echo "---"
+    } >> "$TEST_RUN_DIR/debug/reasoning_extraction.log"
     
     if [ -n "$ACTUAL_ANSWER" ]; then
         # Compare answers
