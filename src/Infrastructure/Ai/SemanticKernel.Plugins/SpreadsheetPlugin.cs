@@ -13,6 +13,8 @@ using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
 using SpreadsheetCLI.Application.DTOs;
 using SpreadsheetCLI.Domain.Enums;
 
+using SpreadsheetCLI.Infrastructure.Services;
+
 namespace SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Plugins;
 
 /// <summary>
@@ -22,7 +24,8 @@ public sealed class SpreadsheetPlugin(
     ILogger<SpreadsheetPlugin> logger,
     IFileStorageService fileStorage,
     IActivityPublisher activityPublisher,
-    ISpreadsheetAnalysisService analysisService)
+    ISpreadsheetAnalysisService analysisService,
+    IFileHashService fileHashService)
 {
     private readonly ILogger<SpreadsheetPlugin> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
@@ -36,6 +39,9 @@ public sealed class SpreadsheetPlugin(
     private readonly ISpreadsheetAnalysisService _analysisService =
         analysisService ?? throw new ArgumentNullException(nameof(analysisService));
 
+    private readonly IFileHashService _fileHashService =
+        fileHashService ?? throw new ArgumentNullException(nameof(fileHashService));
+
     [KernelFunction("query_spreadsheet")]
     [Description("Queries Excel data using natural language with high accuracy through sandbox execution")]
     public async Task<string> QuerySpreadsheetAsync(
@@ -47,6 +53,9 @@ public sealed class SpreadsheetPlugin(
     {
         _logger.LogInformation("QuerySpreadsheet V3 Refactored: {File} - '{Query}'", filePath, query);
 
+        // Calculate file hash for integrity validation
+        var fileHash = await _fileHashService.CalculateHashAsync(filePath);
+        
         // Log the start of the query process
         await _activityPublisher.PublishAsync("query_spreadsheet.start", new
         {
@@ -54,7 +63,8 @@ public sealed class SpreadsheetPlugin(
             query,
             sheetName,
             timestamp = DateTime.UtcNow,
-            version = "V3Refactored"
+            version = "V3Refactored",
+            fileHash
         });
 
         try

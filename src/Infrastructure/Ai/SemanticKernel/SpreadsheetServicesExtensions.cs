@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using SpreadsheetCLI.Application.Interfaces.Spreadsheet;
 using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Services;
+using SpreadsheetCLI.Infrastructure.Services;
 
 namespace SpreadsheetCLI.Infrastructure.Ai.SemanticKernel;
 
@@ -16,6 +17,7 @@ public static class SpreadsheetServicesExtensions
     {
         // Register core services
         services.AddScoped<ISpreadsheetAnalysisService, SpreadsheetAnalysisService>();
+        services.AddScoped<IFileHashService, FileHashService>();
 
         return services;
     }
