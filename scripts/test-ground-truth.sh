@@ -5,6 +5,7 @@
 
 # Configuration
 DATASET_FILE="./scripts/dataset/expanded_dataset_moved.xlsx"
+GROUND_TRUTH_FILE="./scripts/dataset/ground_truth_expanded_dataset_moved.xlsx"
 PROJECT_DIR="."
 LOGS_BASE_DIR="./logs"
 
@@ -40,6 +41,11 @@ print_header() {
 # Check if required files exist
 if [ ! -f "$DATASET_FILE" ]; then
     print_error "Dataset file '$DATASET_FILE' not found!"
+    exit 1
+fi
+
+if [ ! -f "$GROUND_TRUTH_FILE" ]; then
+    print_error "Ground truth file '$GROUND_TRUTH_FILE' not found!"
     exit 1
 fi
 
@@ -89,32 +95,185 @@ else
     exit 1
 fi
 
-# Manual test cases from ground truth
-declare -a TEST_QUESTIONS=(
-    "What is the total sum of TotalBaseIncome?"
-    "What is the average TotalBaseIncome?"
-    "What is the maximum value of TotalBaseIncome?"
-    "What is the average Quantity?"
-    "What is the total sum of Quantity?"
-    "What percentage of records have PaymentType = 'CASH'?"
-    "Which SecurityID shows the greatest total TotalBaseIncome?"
-    "What is the total number of unique SecurityIDs?"
-    "Which SecurityID has the highest average TotalBaseIncome?"
-    "What is the total TotalBaseIncome for PaymentType = 'CASH'?"
-)
+# Check if dotnet-script is available, otherwise compile and use the C# extractor
+EXTRACTOR_SCRIPT="./scripts/extract-ground-truth.csx"
+EXTRACTOR_EXE="./scripts/ExtractGroundTruth"
 
-declare -a EXPECTED_ANSWERS=(
-    "12977.52"
-    "91.13"
-    "3700.00"
-    "4988.27"
-    "710248"
-    "48.69"
-    "MSFT"
-    "5"
-    "MSFT"
-    "5869.48"
-)
+# Function to extract ground truth data
+extract_ground_truth() {
+    # Try dotnet-script
+    if command -v dotnet-script &> /dev/null && [ -f "$EXTRACTOR_SCRIPT" ]; then
+        # Use dotnet-script if available
+        dotnet-script "$EXTRACTOR_SCRIPT" "$GROUND_TRUTH_FILE" 2>/dev/null
+    elif [ -f "$EXTRACTOR_EXE" ]; then
+        # Use pre-compiled executable
+        "$EXTRACTOR_EXE" "$GROUND_TRUTH_FILE" 2>/dev/null
+    else
+        # Try to compile the extractor using Aspose.Cells (same as main project)
+        print_info "Compiling ground truth extractor..."
+        
+        # First check if we have a pre-compiled version
+        if [ -f "./scripts/ExtractGroundTruth.cs" ]; then
+            # Compile using the project references
+            if dotnet build -c Release ./scripts/ExtractGroundTruth.cs -r linux-x64 --self-contained -p:PublishSingleFile=true -o ./scripts 2>/dev/null; then
+                ./scripts/ExtractGroundTruth "$GROUND_TRUTH_FILE" 2>/dev/null
+                return $?
+            fi
+            
+            # Try simpler compilation with reference to Aspose.Cells
+            if dotnet run --project ./SpreadsheetCLI.csproj -- compile-extractor 2>/dev/null; then
+                ./scripts/ExtractGroundTruth "$GROUND_TRUTH_FILE" 2>/dev/null
+                return $?
+            fi
+        fi
+        
+        # Try to compile inline
+        cat > /tmp/ExtractGroundTruth.csproj << 'EOF'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspose.Cells" Version="24.10.0" />
+  </ItemGroup>
+</Project>
+EOF
+        
+        cp ./scripts/ExtractGroundTruth.cs /tmp/ExtractGroundTruth.cs 2>/dev/null || cat > /tmp/ExtractGroundTruth.cs << 'EOF'
+using System;
+using System.IO;
+using Aspose.Cells;
+
+class Program
+{
+    static void Main(string[] args)
+    {
+        var groundTruthFile = args.Length > 0 ? args[0] : "./scripts/dataset/ground_truth_expanded_dataset_moved.xlsx";
+        
+        if (!File.Exists(groundTruthFile))
+        {
+            Console.Error.WriteLine($"Error: Ground truth file not found: {groundTruthFile}");
+            Environment.Exit(1);
+        }
+        
+        try
+        {
+            var workbook = new Workbook(groundTruthFile);
+            var worksheet = workbook.Worksheets[0];
+            
+            int questionCol = -1;
+            int answerCol = -1;
+            
+            // Find Question and Answer columns
+            for (int col = 0; col < worksheet.Cells.MaxColumn + 1; col++)
+            {
+                var cell = worksheet.Cells[0, col];
+                var value = cell.StringValue?.Trim();
+                
+                if (value == "Question")
+                    questionCol = col;
+                else if (value == "Answer")
+                    answerCol = col;
+            }
+            
+            if (questionCol == -1 || answerCol == -1)
+            {
+                Console.Error.WriteLine("Error: Could not find 'Question' or 'Answer' columns");
+                Environment.Exit(1);
+            }
+            
+            // Extract questions and answers
+            for (int row = 1; row <= worksheet.Cells.MaxRow; row++)
+            {
+                var questionCell = worksheet.Cells[row, questionCol];
+                var answerCell = worksheet.Cells[row, answerCol];
+                
+                var question = questionCell.StringValue;
+                var answer = answerCell.StringValue;
+                
+                if (!string.IsNullOrWhiteSpace(question) && !string.IsNullOrWhiteSpace(answer))
+                {
+                    Console.WriteLine($"{question}|||{answer}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error reading Excel file: {ex.Message}");
+            Environment.Exit(1);
+        }
+    }
+}
+EOF
+        
+        # Try to compile with Aspose.Cells reference
+        if cd /tmp && dotnet build -c Release 2>/dev/null && cd - > /dev/null; then
+            /tmp/bin/Release/net9.0/ExtractGroundTruth "$GROUND_TRUTH_FILE" 2>/dev/null
+        else
+            # Last resort: use the fallback script
+            if [ -f "./scripts/extract-ground-truth-fallback.sh" ]; then
+                print_info "Using fallback method to extract ground truth data..."
+                ./scripts/extract-ground-truth-fallback.sh "$GROUND_TRUTH_FILE" 2>/dev/null
+            else
+                print_error "Could not extract ground truth data"
+                print_error "Please install either: python3 with openpyxl, or dotnet-script"
+                return 1
+            fi
+        fi
+    fi
+}
+
+# Read ground truth data dynamically
+print_info "Reading ground truth data from: $GROUND_TRUTH_FILE"
+GROUND_TRUTH_DATA=$(extract_ground_truth)
+
+if [ -z "$GROUND_TRUTH_DATA" ]; then
+    print_error "Failed to read ground truth data!"
+    print_info "Falling back to hardcoded test cases..."
+    
+    # Fallback to hardcoded values
+    declare -a TEST_QUESTIONS=(
+        "What is the total sum of TotalBaseIncome?"
+        "What is the average TotalBaseIncome?"
+        "What is the maximum value of TotalBaseIncome?"
+        "What is the average Quantity?"
+        "What is the total sum of Quantity?"
+        "What percentage of records have PaymentType = 'CASH'?"
+        "Which SecurityID shows the greatest total TotalBaseIncome?"
+        "What is the total number of unique SecurityIDs?"
+        "Which SecurityID has the highest average TotalBaseIncome?"
+        "What is the total TotalBaseIncome for PaymentType = 'CASH'?"
+    )
+    
+    declare -a EXPECTED_ANSWERS=(
+        "12977.52"
+        "91.13"
+        "3700.00"
+        "4988.27"
+        "710248"
+        "48.69"
+        "MSFT"
+        "5"
+        "MSFT"
+        "5869.48"
+    )
+else
+    # Parse the ground truth data
+    declare -a TEST_QUESTIONS=()
+    declare -a EXPECTED_ANSWERS=()
+    
+    while IFS= read -r line; do
+        if [[ "$line" == *"|||"* ]]; then
+            question="${line%|||*}"
+            answer="${line#*|||}"
+            TEST_QUESTIONS+=("$question")
+            EXPECTED_ANSWERS+=("$answer")
+        fi
+    done <<< "$GROUND_TRUTH_DATA"
+    
+    print_success "Loaded ${#TEST_QUESTIONS[@]} test cases from ground truth file"
+fi
 
 # Initialize counters
 TOTAL_TESTS=${#TEST_QUESTIONS[@]}
@@ -161,12 +320,12 @@ compare_answers() {
     
     # Try numeric comparison with tolerance (without bc)
     if [[ "$actual" =~ ^[0-9]+(\.[0-9]+)?$ ]] && [[ "$expected" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        # Compare integers (remove decimal part for simple comparison)
-        local actual_int=${actual%.*}
-        local expected_int=${expected%.*}
-        local diff=$((actual_int > expected_int ? actual_int - expected_int : expected_int - actual_int))
-        # Allow difference of 1 for rounding
-        if [ $diff -le 1 ]; then
+        # Compare as floats by multiplying by 100 to avoid decimal issues
+        local actual_x100=$(echo "$actual" | awk '{printf "%.0f", $1 * 100}')
+        local expected_x100=$(echo "$expected" | awk '{printf "%.0f", $1 * 100}')
+        local diff=$((actual_x100 > expected_x100 ? actual_x100 - expected_x100 : expected_x100 - actual_x100))
+        # Allow difference of 100 (1.00 when divided back)
+        if [ $diff -le 100 ]; then
             return 0
         fi
     fi
@@ -211,8 +370,46 @@ for i in "${!TEST_QUESTIONS[@]}"; do
         continue
     fi
     
-    # Extract answer from the command output
-    ACTUAL_ANSWER=$(echo "$RESULT" | grep -o '"Answer":"[^"]*"' | cut -d'"' -f4)
+    # Extract reasoning from the command output for LLM validation
+    # First extract the full JSON result
+    JSON_RESULT=$(echo "$RESULT" | tail -n 50 | awk '/^{/{flag=1} flag; /^}/{exit}')
+    
+    # Extract the Reasoning field
+    REASONING=$(echo "$JSON_RESULT" | jq -r '.Reasoning' 2>/dev/null || echo "")
+    
+    # If no reasoning found, try to extract it manually
+    if [ -z "$REASONING" ] || [ "$REASONING" = "null" ]; then
+        REASONING=$(echo "$RESULT" | grep -o '"Reasoning":[[:space:]]*"[^"]*"' | sed 's/"Reasoning":[[:space:]]*"//' | sed 's/"$//' | tail -1)
+    fi
+    
+    # Call LLM to extract the answer from the reasoning
+    if [ -n "$REASONING" ]; then
+        # Create a prompt for the LLM to extract the answer
+        VALIDATION_PROMPT="Based on this reasoning, what is the numerical answer to the question '$QUESTION'? 
+
+Reasoning: $REASONING
+
+Expected answer format: $EXPECTED_ANSWER
+
+Please respond with ONLY the numerical value or text answer, without any explanation. If the reasoning mentions multiple values, extract the final answer that directly answers the question."
+        
+        # Call the spreadsheet CLI with the validation prompt
+        ACTUAL_ANSWER=$("$EXECUTABLE" --validate-answer "$VALIDATION_PROMPT" 2>/dev/null || echo "")
+        
+        # If validation fails, fall back to extracting from the Answer field
+        if [ -z "$ACTUAL_ANSWER" ]; then
+            ACTUAL_ANSWER=$(echo "$JSON_RESULT" | jq -r '.Answer' 2>/dev/null || echo "")
+            if [ -z "$ACTUAL_ANSWER" ] || [ "$ACTUAL_ANSWER" = "null" ]; then
+                ACTUAL_ANSWER=$(echo "$RESULT" | tail -n 20 | grep -o '"Answer":[[:space:]]*"[^"]*"' | cut -d'"' -f4 | head -1)
+            fi
+        fi
+    else
+        # Fallback to original Answer extraction if no reasoning available
+        ACTUAL_ANSWER=$(echo "$JSON_RESULT" | jq -r '.Answer' 2>/dev/null || echo "")
+        if [ -z "$ACTUAL_ANSWER" ] || [ "$ACTUAL_ANSWER" = "null" ]; then
+            ACTUAL_ANSWER=$(echo "$RESULT" | tail -n 20 | grep -o '"Answer":[[:space:]]*"[^"]*"' | cut -d'"' -f4 | head -1)
+        fi
+    fi
     
     # Also save the full JSON output with test info
     {

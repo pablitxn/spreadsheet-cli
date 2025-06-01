@@ -76,7 +76,7 @@ public class Program
                 services.AddSingleton<FileLoggerService>();
 
                 // Add application services
-                services.AddSingleton<ISpreadsheetAnalysisService, SpreadsheetAnalysisService>();
+                services.AddSpreadsheetServices();
 
                 // Add Semantic Kernel
                 var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
