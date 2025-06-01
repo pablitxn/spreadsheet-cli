@@ -1019,6 +1019,12 @@ public class SpreadsheetAnalysisService(
                       4. Determine if you need to continue analyzing more rows or if you have sufficient data
                       5. Provide the user intent with COMPLETE structural context
                       6. For queries about percentages or proportions, ensure you collect enough data to make accurate calculations
+                      
+                      CRITICAL FOR AGGREGATE FUNCTIONS (MIN, MAX, AVERAGE, PERCENTILE, VARIANCE, etc.):
+                      - If the query involves these functions on a column, you MUST extract ALL values from that column
+                      - Continue analysis until you have collected the ENTIRE column data
+                      - Do not stop at "first evidence" - range functions need the complete dataset
+                      - For MIN/MAX of dates: Extract ALL date values, not just a sample
 
                       Format artifacts like this:
                       ## Artifact: [Description]
@@ -1132,6 +1138,11 @@ public class SpreadsheetAnalysisService(
                         * Third column in ArtifactsFormatted = Column C, etc.
                       - Data starts at row 2 (row 1 contains headers)
                       - IMPORTANT: If you extracted 100 matching rows, the dynamic sheet has 101 rows (1 header + 100 data)
+                      
+                      FOR RANGE/AGGREGATE FUNCTIONS:
+                      - When using MIN, MAX, AVERAGE, VAR.S, VAR.P, PERCENTILE, etc., ensure ArtifactsFormatted contains ALL relevant data
+                      - For date columns: Include ALL date values to avoid MIN returning 0
+                      - Use the full range: e.g., =MIN(A2:A23) if you have 22 data rows
 
                       Always for any mathematical calculations return `NeedRunFormula=true`:
 
@@ -1142,8 +1153,20 @@ public class SpreadsheetAnalysisService(
                       - The artifacts contain the actual matching data extracted during traversal
                       - For percentage calculations: Use the counts mentioned in UserIntentWithContext!
 
+                      VARIANCE AND GROUP CALCULATIONS:
+                      - For "highest variance per group": Return BOTH the group identifier AND the variance value
+                      - Use VAR.S for sample variance (n-1 denominator) unless specifically asked for population variance
+                      - Clean numeric data before variance: Round quantities to reasonable precision
+                      - Format: "Group X has variance Y"
+                      
+                      OUTPUT FORMATTING:
+                      - Round results to 2 decimal places for display
+                      - Format large numbers with thousand separators
+                      - For variance values, use scientific notation if > 1e9
+                      
                       Instructions:
                       1. If the query can be answered directly from the artifacts (zero math needed), provide a simple_answer
+                      2. For group-based queries, always include both the group identifier and the calculated value
                       3. Always provide reasoning that references the structural context
 
                       For ArtifactsFormatted, structure the data as a 2D array where:
@@ -1151,6 +1174,11 @@ public class SpreadsheetAnalysisService(
                       - Subsequent rows contain the data values
                       - Include only the columns needed for the calculation
                       - Ensure data types are preserved (numbers as numbers, not strings)
+                      
+                      DATA CLEANSING NOTES:
+                      - Convert accounting negatives "(123)" or "123-" to proper negative numbers: -123
+                      - When asked for "negative values", interpret accounting formats correctly
+                      - Clean currency symbols and thousand separators from numeric values
 
                       FORMULA GUIDELINES based on UserIntentWithContext:
                       - Read the UserIntentWithContext carefully - it contains the exact counts!
@@ -1161,6 +1189,11 @@ public class SpreadsheetAnalysisService(
                           - Note: -1 to exclude header row, and {metadata.DataRowCount} is the total from original dataset
                         * IMPORTANT: For SUM/AVERAGE queries on the dynamic spreadsheet, formulas operate only on the extracted data
                       - The key insight: UserIntentWithContext already did the hard work of counting!
+                      
+                      RATIO CALCULATIONS:
+                      - Row-wise ratio: Average of individual row ratios = AVERAGE(C2:C17) where C contains =A/B for each row
+                      - Aggregate ratio (weighted): Total sum divided = SUM(Income)/SUM(Quantity)
+                      - DEFAULT: Use aggregate ratio unless explicitly asked for "average ratio per row"
 
                       Example reasoning for percentage query:
                       "Based on the UserIntentWithContext, we found X rows with Quantity > 1000 out of {metadata.DataRowCount} total data rows.
@@ -1394,7 +1427,7 @@ public class SpreadsheetAnalysisService(
 
             // Get the result
             var formulaValue = formulaCell.Value;
-            var formulaResult = formulaValue?.ToString() ?? "No result";
+            var formulaResult = FormatFormulaResult(formulaValue);
 
             debugInfo["formulaValue"] = formulaValue ?? "null";
             debugInfo["formulaValueType"] = formulaValue?.GetType().Name ?? "null";
@@ -1450,7 +1483,22 @@ public class SpreadsheetAnalysisService(
                 case JsonValueKind.Number:
                     return jsonElement.GetDouble();
                 case JsonValueKind.String:
-                    return jsonElement.GetString();
+                    var stringValue = jsonElement.GetString();
+                    
+                    // Try to parse as date first
+                    if (TryParseDateFromString(stringValue, out var dateValue))
+                    {
+                        // Convert to Excel date format (OLE Automation date)
+                        return dateValue.ToOADate();
+                    }
+                    
+                    // Try to parse as number (handle formatted numbers)
+                    if (!string.IsNullOrEmpty(stringValue) && TryParseNumericString(stringValue, out var numValue))
+                    {
+                        return numValue;
+                    }
+                    
+                    return stringValue;
                 case JsonValueKind.True:
                 case JsonValueKind.False:
                     return jsonElement.GetBoolean();
@@ -1459,6 +1507,118 @@ public class SpreadsheetAnalysisService(
             }
         }
         return cellValue;
+    }
+    
+    /// <summary>
+    /// Tries to parse various date formats from string
+    /// </summary>
+    private bool TryParseDateFromString(string? value, out DateTime result)
+    {
+        result = default;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        
+        // Common date formats to try
+        string[] dateFormats = new[]
+        {
+            "dd/MM/yyyy", "d/M/yyyy", "dd/MM/yy", "d/M/yy",
+            "MM/dd/yyyy", "M/d/yyyy", "MM/dd/yy", "M/d/yy",
+            "yyyy-MM-dd", "yyyy/MM/dd",
+            "dd-MM-yyyy", "d-M-yyyy",
+            "MMM dd, yyyy", "MMMM dd, yyyy",
+            "dd MMM yyyy", "dd MMMM yyyy"
+        };
+        
+        foreach (var format in dateFormats)
+        {
+            if (DateTime.TryParseExact(value, format, 
+                System.Globalization.CultureInfo.InvariantCulture, 
+                System.Globalization.DateTimeStyles.None, out result))
+            {
+                return true;
+            }
+        }
+        
+        // Try general parsing as last resort
+        return DateTime.TryParse(value, out result);
+    }
+    
+    /// <summary>
+    /// Formats formula results appropriately based on type
+    /// </summary>
+    private string FormatFormulaResult(object? value)
+    {
+        if (value == null) return "No result";
+        
+        switch (value)
+        {
+            case double d:
+                // Handle special cases
+                if (double.IsNaN(d)) return "NaN";
+                if (double.IsInfinity(d)) return "Infinity";
+                
+                // Don't try to convert to date unless we have context that it should be a date
+                // This prevents numeric sums from being displayed as dates
+                
+                // Format numbers appropriately
+                var absValue = Math.Abs(d);
+                
+                // For very small numbers close to zero
+                if (absValue < 0.0001 && absValue > 0)
+                    return d.ToString("E4");
+                
+                // For percentages or ratios (typically between 0 and 100)
+                if (absValue >= 0 && absValue <= 100)
+                {
+                    // Check if it has meaningful decimal places
+                    var rounded = Math.Round(d, 4);
+                    if (Math.Abs(rounded - Math.Round(rounded, 2)) < 0.0001)
+                        return Math.Round(d, 2).ToString("F2"); // 2 decimal places
+                    else
+                        return Math.Round(d, 4).ToString("F4"); // 4 decimal places
+                }
+                
+                // For larger numbers
+                if (absValue >= 1000000)
+                {
+                    // Round to 2 decimal places and format
+                    var rounded = Math.Round(d, 2);
+                    if (rounded % 1 == 0)
+                        return rounded.ToString("N0"); // No decimal places, with thousands separator
+                    else
+                        return rounded.ToString("N2"); // 2 decimal places with thousands separator
+                }
+                else if (absValue >= 100)
+                {
+                    // Ensure proper rounding to 2 decimal places
+                    return Math.Round(d, 2).ToString("F2");
+                }
+                else
+                {
+                    // Small numbers - use 4 decimal places but round first
+                    return Math.Round(d, 4).ToString("F4");
+                }
+                    
+            case float f:
+                return FormatFormulaResult((double)f);
+                
+            case decimal dec:
+                return FormatFormulaResult((double)dec);
+                
+            case int i:
+                return i.ToString("N0");
+                
+            case long l:
+                return l.ToString("N0");
+                
+            case DateTime dt:
+                return dt.ToString("yyyy-MM-dd");
+                
+            case bool b:
+                return b ? "TRUE" : "FALSE";
+                
+            default:
+                return value.ToString() ?? "No result";
+        }
     }
 
     #region Helper Methods
@@ -1570,9 +1730,23 @@ public class SpreadsheetAnalysisService(
             isNegative = true;
             s = s.Substring(1, s.Length - 2).Trim();
         }
+        
+        // Check for trailing minus (accounting style)
+        if (s.EndsWith("-"))
+        {
+            isNegative = true;
+            s = s.Substring(0, s.Length - 1).Trim();
+        }
 
         // Remove currency symbols and thousands separators
-        s = s.Replace("$", "").Replace(",", "").Trim();
+        s = s.Replace("$", "").Replace(",", "").Replace("€", "").Replace("£", "").Trim();
+        
+        // Handle leading minus sign (preserve it)
+        if (s.StartsWith("-"))
+        {
+            isNegative = true;
+            s = s.Substring(1).Trim();
+        }
 
         // Try to parse the cleaned string
         if (double.TryParse(s, out result))
