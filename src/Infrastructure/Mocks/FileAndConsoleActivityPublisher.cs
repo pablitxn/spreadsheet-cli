@@ -13,42 +13,56 @@ public class FileAndConsoleActivityPublisher : IActivityPublisher
 
     public FileAndConsoleActivityPublisher()
     {
-        // Create a unique log file name with timestamp
-        var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-        _logFilePath = Path.Combine(Directory.GetCurrentDirectory(), $"audit_log_{timestamp}.txt");
+        // Check if custom audit log directory is set via environment variable
+        var auditLogDir = Environment.GetEnvironmentVariable("AUDIT_LOG_DIR");
+        if (string.IsNullOrEmpty(auditLogDir))
+        {
+            auditLogDir = Path.Combine(Directory.GetCurrentDirectory(), "logs", "audit");
+        }
         
-        // Write header to file
-        WriteToFile($"=== Spreadsheet CLI Audit Log ===");
-        WriteToFile($"Started at: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        WriteToFile($"Log file: {_logFilePath}");
-        WriteToFile(new string('=', 80));
-        WriteToFile("");
+        // Create directory if it doesn't exist
+        Directory.CreateDirectory(auditLogDir);
+        
+        // Create a unique log file name with timestamp
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
+        var logFileName = $"audit_{timestamp}.json";
+        _logFilePath = Path.Combine(auditLogDir, logFileName);
     }
 
     public Task PublishAsync(string eventType, object data)
     {
-        var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
-        var jsonData = JsonSerializer.Serialize(data, new JsonSerializerOptions
+        var timestamp = DateTime.UtcNow;
+        
+        // Create a structured log entry
+        var logEntry = new
+        {
+            Timestamp = timestamp.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'"),
+            EventType = eventType,
+            Data = data
+        };
+
+        var jsonData = JsonSerializer.Serialize(logEntry, new JsonSerializerOptions
         {
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
 
-        // Format the output
-        var formattedOutput = $"[{timestamp}] {eventType}:\n{jsonData}\n";
-
         // Write to console with colors
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write($"[{timestamp}] ");
+        Console.Write($"[{timestamp:HH:mm:ss.fff}] ");
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine($"{eventType}:");
         Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine(jsonData);
+        Console.WriteLine(JsonSerializer.Serialize(data, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        }));
         Console.ResetColor();
         Console.WriteLine();
 
-        // Write to file
-        WriteToFile(formattedOutput);
+        // Write to file as JSON
+        WriteToFile(jsonData);
 
         return Task.CompletedTask;
     }

@@ -13,7 +13,17 @@ public class FileLoggerService
 
     public FileLoggerService()
     {
-        _logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+        // Check if custom debug log directory is set via environment variable
+        var debugLogDir = Environment.GetEnvironmentVariable("DEBUG_LOG_DIR");
+        if (string.IsNullOrEmpty(debugLogDir))
+        {
+            _logDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+        }
+        else
+        {
+            _logDirectory = debugLogDir;
+        }
+        
         _sessionId = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
         
         Directory.CreateDirectory(_logDirectory);
