@@ -4,6 +4,11 @@
 # Creates a dedicated folder for each test run with all logs
 
 # Configuration
+# Abstract OpenAI API key assignment: if not provided in the environment, use default
+DEFAULT_OPENAI_API_KEY=""
+OPENAI_API_KEY="${OPENAI_API_KEY:-$DEFAULT_OPENAI_API_KEY}"
+export OPENAI_API_KEY
+
 DATASET_FILE="./scripts/dataset/expanded_dataset_moved.xlsx"
 GROUND_TRUTH_FILE="./scripts/dataset/ground_truth_expanded_dataset_moved.xlsx"
 PROJECT_DIR="."
@@ -337,6 +342,26 @@ compare_answers() {
 export AUDIT_LOG_DIR="$TEST_RUN_DIR/audit"
 export DEBUG_LOG_DIR="$TEST_RUN_DIR/debug"
 
+# Check if LLM validation is available
+VALIDATION_SCRIPT="./scripts/validate_test_result.py"
+LLM_VALIDATION_AVAILABLE=false
+if [ -f "$VALIDATION_SCRIPT" ] && command -v python3 &> /dev/null; then
+    if python3 -c "import openai" 2>/dev/null && [ -n "$OPENAI_API_KEY" ]; then
+        LLM_VALIDATION_AVAILABLE=true
+        print_success "LLM validation is available and will be used for better answer extraction"
+    else
+        if ! python3 -c "import openai" 2>/dev/null; then
+            print_warning "LLM validation unavailable: OpenAI library not installed (pip install openai)"
+        elif [ -z "$OPENAI_API_KEY" ]; then
+            print_warning "LLM validation unavailable: OPENAI_API_KEY environment variable not set"
+        fi
+        print_info "Falling back to pattern matching for answer extraction"
+    fi
+else
+    print_info "Using pattern matching for answer extraction"
+fi
+echo ""
+
 # Process each test case
 print_header "Running tests..."
 echo ""
@@ -370,67 +395,112 @@ for i in "${!TEST_QUESTIONS[@]}"; do
         continue
     fi
     
-    # Extract reasoning from the command output for answer extraction
-    # First extract the full JSON result
-    JSON_RESULT=$(echo "$RESULT" | tail -n 50 | awk '/^{/{flag=1} flag; /^}/{exit}')
+    # Use LLM validation to extract answer and validate result
+    VALIDATION_SCRIPT="./scripts/validate_test_result.py"
+    VALIDATION_LOG_FILE="$TEST_RUN_DIR/debug/validation_${TEST_NUM}.json"
     
-    # Extract the Reasoning field
-    REASONING=$(echo "$JSON_RESULT" | jq -r '.Reasoning' 2>/dev/null || echo "")
-    
-    # If no reasoning found, try to extract it manually
-    if [ -z "$REASONING" ] || [ "$REASONING" = "null" ]; then
-        REASONING=$(echo "$RESULT" | grep -o '"Reasoning":[[:space:]]*"[^"]*"' | sed 's/"Reasoning":[[:space:]]*"//' | sed 's/"$//' | tail -1)
+    # Check if validation script exists and has Python with openai
+    USE_LLM_VALIDATION=false
+    if [ -f "$VALIDATION_SCRIPT" ] && command -v python3 &> /dev/null; then
+        if python3 -c "import openai" 2>/dev/null && [ -n "$OPENAI_API_KEY" ]; then
+            USE_LLM_VALIDATION=true
+        else
+            print_warning "LLM validation unavailable: Missing OpenAI library or API key"
+        fi
     fi
     
-    # Extract answer from reasoning using pattern matching
-    if [ -n "$REASONING" ]; then
-        # Try to extract answer from common patterns in reasoning
-        # Pattern 1: "The answer is X" or "is X"
-        ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "(answer is|total is|value is|maximum is|minimum is|average is|percentage is|count is|result is) [0-9.-]+[%]?" | grep -oE "[0-9.-]+[%]?" | tail -1)
+    if [ "$USE_LLM_VALIDATION" = true ]; then
+        # Use LLM validation
+        print_info "Using LLM validation..."
+        VALIDATION_RESULT=$(python3 "$VALIDATION_SCRIPT" "$QUESTION" "$EXPECTED_ANSWER" "$RESULT" 2>"$VALIDATION_LOG_FILE.error")
+        VALIDATION_EXIT_CODE=$?
         
-        # Pattern 2: "X rows/records" for count questions
-        if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"How many"* ]]; then
-            ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "[0-9]+ (rows|records|unique|entries)" | grep -oE "^[0-9]+" | head -1)
+        # Save validation result
+        echo "$VALIDATION_RESULT" > "$VALIDATION_LOG_FILE"
+        
+        if [ $VALIDATION_EXIT_CODE -eq 0 ] || [ $VALIDATION_EXIT_CODE -eq 1 ]; then
+            # Parse validation result
+            IS_CORRECT=$(echo "$VALIDATION_RESULT" | jq -r '.is_correct' 2>/dev/null)
+            ACTUAL_ANSWER=$(echo "$VALIDATION_RESULT" | jq -r '.extracted_answer' 2>/dev/null)
+            EXPLANATION=$(echo "$VALIDATION_RESULT" | jq -r '.explanation' 2>/dev/null)
+            CONFIDENCE=$(echo "$VALIDATION_RESULT" | jq -r '.confidence' 2>/dev/null)
+            ANSWER_LOCATION=$(echo "$VALIDATION_RESULT" | jq -r '.answer_location' 2>/dev/null)
+            
+            # For backward compatibility with existing report format
+            REASONING="$EXPLANATION (Found in: $ANSWER_LOCATION, Confidence: $CONFIDENCE)"
+        else
+            print_warning "LLM validation failed, falling back to pattern matching"
+            USE_LLM_VALIDATION=false
+        fi
+    fi
+    
+    # Fallback to pattern matching if LLM validation is not available or failed
+    if [ "$USE_LLM_VALIDATION" = false ]; then
+        # Extract reasoning from the command output for answer extraction
+        # First extract the full JSON result
+        JSON_RESULT=$(echo "$RESULT" | tail -n 50 | awk '/^{/{flag=1} flag; /^}/{exit}')
+        
+        # Extract the Reasoning field
+        REASONING=$(echo "$JSON_RESULT" | jq -r '.Reasoning' 2>/dev/null || echo "")
+        
+        # If no reasoning found, try to extract it manually
+        if [ -z "$REASONING" ] || [ "$REASONING" = "null" ]; then
+            REASONING=$(echo "$RESULT" | grep -o '"Reasoning":[[:space:]]*"[^"]*"' | sed 's/"Reasoning":[[:space:]]*"//' | sed 's/"$//' | tail -1)
         fi
         
-        # Pattern 3: Look for the expected answer value directly in reasoning
-        if [ -z "$ACTUAL_ANSWER" ] && [ -n "$EXPECTED_ANSWER" ]; then
-            # Remove % and normalize expected answer
-            EXPECTED_NUM=$(echo "$EXPECTED_ANSWER" | sed 's/[%,]//g')
-            # Look for this number in the reasoning
-            if echo "$REASONING" | grep -q "$EXPECTED_NUM"; then
-                ACTUAL_ANSWER="$EXPECTED_NUM"
-                # Add % back if original had it
-                if [[ "$EXPECTED_ANSWER" == *"%" ]]; then
-                    ACTUAL_ANSWER="${ACTUAL_ANSWER}%"
+        # Extract answer from reasoning using pattern matching
+        if [ -n "$REASONING" ]; then
+            # Try to extract answer from common patterns in reasoning
+            # Pattern 1: "The answer is X" or "is X"
+            ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "(answer is|total is|value is|maximum is|minimum is|average is|percentage is|count is|result is) [0-9.-]+[%]?" | grep -oE "[0-9.-]+[%]?" | tail -1)
+            
+            # Pattern 2: "X rows/records" for count questions
+            if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"How many"* ]]; then
+                ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "[0-9]+ (rows|records|unique|entries)" | grep -oE "^[0-9]+" | head -1)
+            fi
+            
+            # Pattern 3: Look for the expected answer value directly in reasoning
+            if [ -z "$ACTUAL_ANSWER" ] && [ -n "$EXPECTED_ANSWER" ]; then
+                # Remove % and normalize expected answer
+                EXPECTED_NUM=$(echo "$EXPECTED_ANSWER" | sed 's/[%,]//g')
+                # Look for this number in the reasoning
+                if echo "$REASONING" | grep -q "$EXPECTED_NUM"; then
+                    ACTUAL_ANSWER="$EXPECTED_NUM"
+                    # Add % back if original had it
+                    if [[ "$EXPECTED_ANSWER" == *"%" ]]; then
+                        ACTUAL_ANSWER="${ACTUAL_ANSWER}%"
+                    fi
                 fi
             fi
-        fi
-        
-        # Pattern 4: Extract from "found X" patterns
-        if [ -z "$ACTUAL_ANSWER" ]; then
-            ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "found [0-9.-]+" | grep -oE "[0-9.-]+" | tail -1)
-        fi
-        
-        # Pattern 5: For percentage questions, look for X%
-        # Skip percentile questions as they should return actual values, not percentages
-        if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"percentage"* || "$QUESTION" == *"percent"* ]] && [[ "$QUESTION" != *"percentile"* ]]; then
-            ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "[0-9.-]+%" | tail -1)
-        fi
-        
-        # If still no answer from reasoning, fall back to Answer field
-        if [ -z "$ACTUAL_ANSWER" ]; then
+            
+            # Pattern 4: Extract from "found X" patterns
+            if [ -z "$ACTUAL_ANSWER" ]; then
+                ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "found [0-9.-]+" | grep -oE "[0-9.-]+" | tail -1)
+            fi
+            
+            # Pattern 5: For percentage questions, look for X%
+            # Skip percentile questions as they should return actual values, not percentages
+            if [ -z "$ACTUAL_ANSWER" ] && [[ "$QUESTION" == *"percentage"* || "$QUESTION" == *"percent"* ]] && [[ "$QUESTION" != *"percentile"* ]]; then
+                ACTUAL_ANSWER=$(echo "$REASONING" | grep -oE "[0-9.-]+%" | tail -1)
+            fi
+            
+            # If still no answer from reasoning, fall back to Answer field
+            if [ -z "$ACTUAL_ANSWER" ]; then
+                ACTUAL_ANSWER=$(echo "$JSON_RESULT" | jq -r '.Answer' 2>/dev/null || echo "")
+                if [ -z "$ACTUAL_ANSWER" ] || [ "$ACTUAL_ANSWER" = "null" ]; then
+                    ACTUAL_ANSWER=$(echo "$RESULT" | tail -n 20 | grep -o '"Answer":[[:space:]]*"[^"]*"' | cut -d'"' -f4 | head -1)
+                fi
+            fi
+        else
+            # Fallback to original Answer extraction if no reasoning available
             ACTUAL_ANSWER=$(echo "$JSON_RESULT" | jq -r '.Answer' 2>/dev/null || echo "")
             if [ -z "$ACTUAL_ANSWER" ] || [ "$ACTUAL_ANSWER" = "null" ]; then
                 ACTUAL_ANSWER=$(echo "$RESULT" | tail -n 20 | grep -o '"Answer":[[:space:]]*"[^"]*"' | cut -d'"' -f4 | head -1)
             fi
         fi
-    else
-        # Fallback to original Answer extraction if no reasoning available
-        ACTUAL_ANSWER=$(echo "$JSON_RESULT" | jq -r '.Answer' 2>/dev/null || echo "")
-        if [ -z "$ACTUAL_ANSWER" ] || [ "$ACTUAL_ANSWER" = "null" ]; then
-            ACTUAL_ANSWER=$(echo "$RESULT" | tail -n 20 | grep -o '"Answer":[[:space:]]*"[^"]*"' | cut -d'"' -f4 | head -1)
-        fi
+        
+        # Set IS_CORRECT to null to use the compare_answers function later
+        IS_CORRECT=""
     fi
     
     # Also save the full JSON output with test info including reasoning
@@ -457,13 +527,33 @@ for i in "${!TEST_QUESTIONS[@]}"; do
     } >> "$TEST_RUN_DIR/debug/reasoning_extraction.log"
     
     if [ -n "$ACTUAL_ANSWER" ]; then
-        # Compare answers
-        if compare_answers "$ACTUAL_ANSWER" "$EXPECTED_ANSWER"; then
+        # Determine if test passed
+        TEST_PASSED=false
+        
+        # If we have LLM validation result, use it
+        if [ "$USE_LLM_VALIDATION" = true ] && [ -n "$IS_CORRECT" ]; then
+            if [ "$IS_CORRECT" = "true" ]; then
+                TEST_PASSED=true
+            fi
+        else
+            # Otherwise use compare_answers function
+            if compare_answers "$ACTUAL_ANSWER" "$EXPECTED_ANSWER"; then
+                TEST_PASSED=true
+            fi
+        fi
+        
+        # Record result
+        if [ "$TEST_PASSED" = true ]; then
             print_success "PASSED - Expected: $EXPECTED_ANSWER, Got: $ACTUAL_ANSWER"
             echo "Test $TEST_NUM: PASSED" >> "$REPORT_FILE"
             echo "  Question: $QUESTION" >> "$REPORT_FILE"
             echo "  Expected: $EXPECTED_ANSWER" >> "$REPORT_FILE"
             echo "  Actual: $ACTUAL_ANSWER" >> "$REPORT_FILE"
+            if [ "$USE_LLM_VALIDATION" = true ]; then
+                echo "  Validation: LLM (Confidence: $CONFIDENCE, Location: $ANSWER_LOCATION)" >> "$REPORT_FILE"
+            else
+                echo "  Validation: Pattern matching" >> "$REPORT_FILE"
+            fi
             echo "  Output: $QUERY_OUTPUT_FILE" >> "$REPORT_FILE"
             echo "" >> "$REPORT_FILE"
             ((PASSED++))
@@ -473,6 +563,12 @@ for i in "${!TEST_QUESTIONS[@]}"; do
             echo "  Question: $QUESTION" >> "$REPORT_FILE"
             echo "  Expected: $EXPECTED_ANSWER" >> "$REPORT_FILE"
             echo "  Actual: $ACTUAL_ANSWER" >> "$REPORT_FILE"
+            if [ "$USE_LLM_VALIDATION" = true ]; then
+                echo "  Validation: LLM (Confidence: $CONFIDENCE, Location: $ANSWER_LOCATION)" >> "$REPORT_FILE"
+                echo "  Explanation: $EXPLANATION" >> "$REPORT_FILE"
+            else
+                echo "  Validation: Pattern matching" >> "$REPORT_FILE"
+            fi
             echo "  Output: $QUERY_OUTPUT_FILE" >> "$REPORT_FILE"
             echo "" >> "$REPORT_FILE"
             ((FAILED++))
@@ -561,3 +657,4 @@ if command -v tree &> /dev/null; then
     print_header "=== TEST DIRECTORY STRUCTURE ==="
     tree "$TEST_RUN_DIR" -L 2
 fi
+
