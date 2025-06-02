@@ -1,6 +1,6 @@
 # SpreadsheetCLI
 
-A powerful command-line interface tool for querying Excel spreadsheets using natural language powered by OpenAI's `o4-mini` and Semantic Kernel.
+A powerful command-line interface tool for querying Excel spreadsheets using natural language powered by OpenAI's GPT-4 and Semantic Kernel. Features an intuitive CLI with multiple commands for interactive queries, batch processing, and ground truth validation.
 
 ## Prerequisites
 
@@ -30,45 +30,113 @@ Or add it to `appsettings.json`:
 }
 ```
 
-### Build the Project
+### Quick Install
 ```bash
-dotnet build
+# Run the installation script
+./install.sh
+```
+
+### Manual Build
+```bash
+dotnet build -c Release
 ```
 
 ## Usage
 
-### Interactive Mode
-Simply run the executable without arguments:
+### Command Overview
+
 ```bash
-./bin/Debug/net9.0/linux-x64/ssllm
+ssllm [command] [options]
 ```
 
-Then follow the prompts to:
-1. Enter your Excel file path
-2. Ask questions about your data
-3. Type 'exit' to quit
+Available commands:
+- `query` - Query a spreadsheet with natural language
+- `interactive` (default) - Start interactive mode
+- `browse` - Browse and select Excel files
+- `test` - Run ground truth validation tests  
+- `batch` - Process multiple queries in batch
+- `config` - Manage configuration
 
-### Command Mode
-For scripting and automation:
+### Interactive Mode (Default)
+Start the interactive mode by running without arguments:
 ```bash
-./bin/Debug/net9.0/linux-x64/ssllm <file_path> "<query>"
+ssllm
+# or explicitly
+ssllm interactive
 ```
 
-Example:
+Features:
+- File browser for easy file selection
+- Query history
+- Real-time results with syntax highlighting
+- Commands: `exit`, `clear`, `history`, `file`
+
+### Query Command
+Run a single query against a spreadsheet:
 ```bash
-./bin/Debug/net9.0/linux-x64/ssllm expanded_dataset_moved.xlsx "What is the total Quantity for SecurityID 101121101?"
+ssllm query <file> "<question>"
+
+# With export options
+ssllm query data.xlsx "What is the total?" --export markdown --output result.md
+ssllm query data.xlsx "What is the average?" --export csv -o result.csv
+ssllm query data.xlsx "Show me the max" --export json --verbose
 ```
 
-### Using Helper Scripts
-
-#### Quick Query (with build)
+### Browse Command  
+Browse and select Excel files interactively:
 ```bash
-./scripts/query.sh "What is the average TotalBaseIncome for DIV payments?"
+ssllm browse
+ssllm browse --path ./data --filter "*.xlsx"
 ```
 
-#### Fast Query (no build)
+### Test Command
+Run ground truth validation tests:
 ```bash
-./scripts/query-fast.sh "Which SecurityID has the highest aggregate TotalBaseIncome?"
+# Auto-detect test files in standard locations
+ssllm test --auto
+
+# Specify files manually
+ssllm test --data data.xlsx --truth ground_truth.xlsx
+
+# Options
+ssllm test --auto --verbose  # Show detailed output
+ssllm test --auto --no-llm   # Use pattern matching instead of LLM
+```
+
+### Batch Processing
+Process multiple queries efficiently:
+```bash
+# From text file (one query per line)
+ssllm batch data.xlsx --queries queries.txt
+
+# From JSON file
+ssllm batch data.xlsx --queries-json queries.json
+
+# With parallel processing
+ssllm batch data.xlsx --queries queries.txt --parallel 4
+
+# Custom output directory
+ssllm batch data.xlsx --queries queries.txt --output ./results
+```
+
+### Configuration Management
+Manage application settings:
+```bash
+# Set configuration values
+ssllm config set openai.key "your-api-key"
+ssllm config set default.model "gpt-4o"
+
+# Get configuration values  
+ssllm config get openai.key
+
+# List all configurations
+ssllm config list
+```
+
+### Legacy Command Mode
+For backwards compatibility:
+```bash
+ssllm <file_path> "<query>"
 ```
 
 ## Project Structure
@@ -111,6 +179,28 @@ The project follows **Clean Architecture** principles:
 - **AsposeSpreadsheetRepository**: Excel file handling using Aspose.Cells
 - **Semantic Kernel**: Orchestrates AI capabilities
 
+## Features
+
+### 🚀 New CLI Interface
+- **Modern command structure** with intuitive verbs and options
+- **Interactive file browser** for easy Excel file selection
+- **Export capabilities** to JSON, CSV, and Markdown formats
+- **Batch processing** for running multiple queries efficiently
+- **Configuration management** for storing settings
+- **Ground truth validation** for testing accuracy
+
+### 🔍 Natural Language Queries
+- Ask questions in plain English
+- Automatic formula generation
+- Intelligent data extraction and analysis
+- Support for complex aggregations and calculations
+
+### 📊 Advanced Analytics
+- Statistical functions (average, sum, max, min, std dev)
+- Filtering and grouping operations
+- Percentage calculations
+- Ratio and comparison queries
+
 ## Example Queries
 
 Here are some example queries you can run on financial spreadsheet data:
@@ -134,14 +224,27 @@ Here are some example queries you can run on financial spreadsheet data:
 
 ## Testing
 
+### Unit Tests
 Run the test suite:
 ```bash
 dotnet test
 ```
 
-Test scripts are available in the `scripts/` directory:
+### Ground Truth Validation
+Run comprehensive ground truth tests:
+```bash
+# Using the new CLI
+ssllm test --auto
+
+# Using the legacy script
+./scripts/test-ground-truth.sh
+```
+
+### Other Test Scripts
+Available in the `scripts/` directory:
 - `test-audit-log.sh`: Test audit logging functionality
 - `test-metadata.sh`: Test metadata extraction
+- `query.sh`: Quick query testing
 
 ## Contributing
 

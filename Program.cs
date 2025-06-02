@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using CommandLine;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,13 +18,14 @@ using SpreadsheetCLI.Infrastructure.Ai.SemanticKernel.Plugins;
 using SpreadsheetCLI.Infrastructure.Mocks;
 using SpreadsheetCLI.Infrastructure.Repositories;
 using SpreadsheetCLI.Presentation.ConsoleUI;
+using SpreadsheetCLI.Presentation.ConsoleUI.Commands;
 using SpreadsheetCLI.Infrastructure.Services;
 
 namespace SpreadsheetCLI;
 
 public class Program
 {
-    static async Task Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
         IHost host;
         try
@@ -32,20 +34,90 @@ public class Program
         }
         catch (Exception ex)
         {
-            throw;
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"Failed to initialize: {ex.Message}");
+            Console.ResetColor();
+            return 1;
         }
 
         var logger = host.Services.GetRequiredService<ILogger<Program>>();
         logger.LogInformation("SpreadsheetCLI Started");
 
+        // If no args, run interactive mode
         if (args.Length == 0)
         {
-            await RunInteractiveMode(host);
+            var handler = new CliHandler(host.Services);
+            return await handler.HandleInteractiveAsync(new InteractiveOptions());
         }
-        else
+
+        // Parse command line arguments
+        return await Parser.Default.ParseArguments<
+            QueryOptions,
+            InteractiveOptions,
+            BrowseOptions,
+            TestOptions,
+            BatchOptions,
+            ConfigOptions
+        >(args)
+        .MapResult(
+            async (QueryOptions opts) => await HandleQuery(host, opts),
+            async (InteractiveOptions opts) => await HandleInteractive(host, opts),
+            async (BrowseOptions opts) => await HandleBrowse(host, opts),
+            async (TestOptions opts) => await HandleTest(host, opts),
+            async (BatchOptions opts) => await HandleBatch(host, opts),
+            async (ConfigOptions opts) => await HandleConfig(host, opts),
+            async errs => await HandleLegacyMode(host, args)
+        );
+    }
+
+    static async Task<int> HandleQuery(IHost host, QueryOptions options)
+    {
+        var handler = new CliHandler(host.Services);
+        return await handler.HandleQueryAsync(options);
+    }
+
+    static async Task<int> HandleInteractive(IHost host, InteractiveOptions options)
+    {
+        var handler = new CliHandler(host.Services);
+        return await handler.HandleInteractiveAsync(options);
+    }
+
+    static async Task<int> HandleBrowse(IHost host, BrowseOptions options)
+    {
+        var handler = new CliHandler(host.Services);
+        return await handler.HandleBrowseAsync(options);
+    }
+
+    static async Task<int> HandleTest(IHost host, TestOptions options)
+    {
+        var handler = new CliHandler(host.Services);
+        return await handler.HandleTestAsync(options);
+    }
+
+    static async Task<int> HandleBatch(IHost host, BatchOptions options)
+    {
+        var handler = new CliHandler(host.Services);
+        return await handler.HandleBatchAsync(options);
+    }
+
+    static async Task<int> HandleConfig(IHost host, ConfigOptions options)
+    {
+        var handler = new CliHandler(host.Services);
+        return await handler.HandleConfigAsync(options);
+    }
+
+    static async Task<int> HandleLegacyMode(IHost host, string[] args)
+    {
+        // Support legacy mode: ssllm <file> <query>
+        if (args.Length >= 2 && !args[0].StartsWith("-") && File.Exists(args[0]))
         {
             await RunCommandMode(host, args);
+            return 0;
         }
+        
+        // If we can't parse it, show help
+        Console.WriteLine("Invalid command. Use --help for usage information.");
+        return 1;
     }
 
     static IHostBuilder CreateHostBuilder(string[] args) =>
@@ -232,7 +304,7 @@ public class Program
                 var prettyJson = JsonSerializer.Serialize(jsonResult, options);
                 Console.WriteLine(prettyJson);
             }
-            catch (Exception parseEx)
+            catch
             {
                 // If JSON parsing fails, print the raw result
                 Console.WriteLine(result);

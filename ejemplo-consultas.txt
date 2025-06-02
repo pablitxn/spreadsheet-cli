@@ -1,0 +1,5 @@
+¿Cuál es el total de Quantity para SecurityID 101121101?
+¿Cuál es el promedio de TotalBaseIncome?
+¿Qué SecurityID tiene el mayor TotalBaseIncome?
+¿Cuántas filas tienen PaymentType 'DIV'?
+¿Cuál es la suma total de TotalBaseIncome?
