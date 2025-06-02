@@ -1,0 +1,23 @@
+{
+  "Success": true,
+  "Query": "What is the average TotalBaseIncome?",
+  "Answer": "8988.26",
+  "Formula": "=AVERAGE(A2:A23)",
+  "Reasoning": "To calculate the average TotalBaseIncome, we sum all the values in the TotalBaseIncome column and divide by the number of data rows, which is 22. The formula used is =AVERAGE(A2:A23), where A2:A23 represents the range of TotalBaseIncome values in the dynamic spreadsheet.",
+  "HumanExplanation": null,
+  "RequiredCalculation": true,
+  "DatasetContext": {
+    "HeaderRowIndex": 3,
+    "DataStartRow": 4,
+    "DataEndRow": 25,
+    "TotalDataRows": 22,
+    "Explanation": "The dataset has headers at row 3 and contains 22 data rows (from row 4 to 25)"
+  },
+  "DataUsed": {
+    "Rows": 23,
+    "Columns": 1,
+    "Headers": [
+      "TotalBaseIncome"
+    ]
+  }
+}
